@@ -22,17 +22,17 @@ Using classical mechanics principles, the **HONE framework** computes equilibriu
 ### 1️⃣ Clone the repository:
    ```bash
    git clone https://github.com/your-repo/HONE.git
-   cd HONE```
+   cd HONE
 ### 2️⃣ Install dependencies:
 Install the required Python packages using the following command:
 
   ```bash
-  pip install -r requirements.txt```
+  pip install -r requirements.txt
 ### 3️⃣ Run the Example:
 Run the example script to see **HONE** in action:
 
 ```bash
-python example.py```
+python example.py
 
 ### 🌀 What You’ll Observe:
 
