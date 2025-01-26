@@ -23,17 +23,19 @@ Using classical mechanics principles, the **HONE framework** computes equilibriu
    ```bash
    git clone https://github.com/your-repo/HONE.git
    cd HONE
+```
 ### 2️⃣ Install dependencies:
 Install the required Python packages using the following command:
 
   ```bash
   pip install -r requirements.txt
+```
 ### 3️⃣ Run the Example:
 Run the example script to see **HONE** in action:
-
-```bash
+```
+bash
 python example.py
-
+```
 ### 🌀 What You’ll Observe:
 
 When you run this script, you'll uncover:
@@ -61,5 +63,5 @@ To adjust these parameters, simply update the `config.json` file or pass them di
 
 ```bash
 python example.py --iterations 500 --dim 3 --dt 0.01 --gamma 1.5```
-
+```
 🚀 Uncover the hidden dynamics of networks with HONE! ⚪🌊📊
