@@ -11,10 +11,14 @@ Using classical mechanics principles, the **HONE framework** computes equilibriu
 ---
 
 ## 🌟 **Key Highlights**
-- ⚪ **Node Dynamics**: Understand how individual nodes (particles) interact in a network.
-- 🌀 **Spring-like Edges**: Capture structural dependencies via harmonic couplings.
-- 🌌 **Global Perspective**: Analyze energy landscapes for insights into configurational variability.
-- ⚡ **Efficient Computation**: Optimized for both CPU and GPU.
+1. **Dual Implementation**:
+   - **`GPU_HONE.py`**: Optimized for CUDA-enabled GPUs to accelerate computations.
+   - **`CPU_HONE.py`**: CPU-based version for systems without GPU support.
+2. **Node Dynamics**: Understand how individual nodes (particles) interact in a network.
+3. **Spring-like Edges**: Capture structural dependencies via harmonic couplings.
+4. **Global Perspective**: Analyze energy landscapes for insights into configurational variability.
+5. **Harmonic Network Inconsistency (HNI)**: Quantifies network complexity and variability.
+
 
 ---
 
