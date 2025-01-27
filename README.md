@@ -1,8 +1,8 @@
 # 🕸️ **Harmonic Oscillator Network Embedding (HONE)** Framework 🕸️
 
 This framework treats networks like a system of connected oscillators:
-- ⚪ **Nodes** are represented as round objects (particles).
-- 🌀 **Edges** are modeled as springs connecting the nodes.
+- **Nodes** are represented as round objects (particles).
+- **Edges** are modeled as springs connecting the nodes.
 
 Using classical mechanics principles, the **HONE framework** computes equilibrium configurations to map network topology while quantifying its complexity through the **Harmonic Network Inconsistency (HNI)** metric. 📈
 
