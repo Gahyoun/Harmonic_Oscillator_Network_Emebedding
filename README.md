@@ -1,4 +1,4 @@
-# 🪐 **Harmonic Oscillator Network Embedding (HONE)** Framework 🪐
+# 🕸️ **Harmonic Oscillator Network Embedding (HONE)** Framework 🕸️
 
 This framework treats networks like a system of connected oscillators:
 - ⚪ **Nodes** are represented as round objects (particles).
