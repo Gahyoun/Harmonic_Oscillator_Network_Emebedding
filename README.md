@@ -1,7 +1,5 @@
 # 🪐 **Harmonic Oscillator Network Embedding (HONE)** Framework 🪐
 
-Welcome to the **Harmonic Oscillator Network Embedding (HONE)** repository! 🎉 Unleash the power of physics-based modeling to analyze networks 🌌. 
-
 This framework treats networks like a system of connected oscillators:
 - ⚪ **Nodes** are represented as round objects (particles).
 - 🌀 **Edges** are modeled as springs connecting the nodes.
@@ -68,4 +66,3 @@ To adjust these parameters, simply update the `config.json` file or pass them di
 ```bash
 python example.py --iterations 500 --dim 3 --dt 0.01 --gamma 1.5```
 ```
-🚀 Uncover the hidden dynamics of networks with HONE! ⚪🌊📊
