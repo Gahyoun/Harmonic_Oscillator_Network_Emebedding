@@ -51,7 +51,7 @@ All generated visualizations and data outputs will be saved to the `results/` di
 
 ---
 
-### ⚙️ Advanced Usage:
+⚙️ Advanced Usage:
 
 HONE provides a flexible interface for customization:
 
@@ -61,8 +61,9 @@ HONE provides a flexible interface for customization:
 - **`dt`**: Adjust the time step for the dynamics.
 - **`gamma`**: Modify the damping coefficient for harmonic oscillations.
 
-To adjust these parameters, simply update the `config.json` file or pass them directly as arguments when running the script:
+> **⚠️ Note**: Avoid setting `gamma` to `0` or very low values to prevent numerical instability caused by floating-point errors. Choose small but non-zero values when a low damping effect is desired.
 
+To adjust these parameters, simply update the `config.json` file or pass them directly as arguments when running the script:
 ```bash
 python example.py --iterations 500 --dim 3 --dt 0.01 --gamma 1.5```
 ```
