@@ -7,6 +7,19 @@ This framework treats networks like a system of connected oscillators:
 Using classical mechanics principles, the **HONE framework** computes equilibrium configurations to map network topology while quantifying its complexity through the **Harmonic Network Inconsistency (HNI)** metric. 📈
 
 ---
+⚙️ Advanced Usage:
+
+HONE provides a flexible interface for customization:
+
+- **`iterations`**: Set the number of iterations for the numerical solver.
+- **`dim`**: Define the dimensionality of the embedding space.
+- **`seed_ensemble`**: Control the number of ensemble runs to compute HNI.
+- **`dt`**: Adjust the time step for the dynamics.
+- **`gamma`**: Modify the damping coefficient for harmonic oscillations.
+
+> **⚠️ Note**: Avoid setting `gamma` to `0` or very low values to prevent numerical instability caused by floating-point errors. Choose small but non-zero values when a low damping effect is desired.
+
+---
 
 ## 🌟 **Key Highlights**
 1. **Dual Implementation**:
@@ -51,17 +64,6 @@ All generated visualizations and data outputs will be saved to the `results/` di
 
 ---
 
-⚙️ Advanced Usage:
-
-HONE provides a flexible interface for customization:
-
-- **`iterations`**: Set the number of iterations for the numerical solver.
-- **`dim`**: Define the dimensionality of the embedding space.
-- **`seed_ensemble`**: Control the number of ensemble runs to compute HNI.
-- **`dt`**: Adjust the time step for the dynamics.
-- **`gamma`**: Modify the damping coefficient for harmonic oscillations.
-
-> **⚠️ Note**: Avoid setting `gamma` to `0` or very low values to prevent numerical instability caused by floating-point errors. Choose small but non-zero values when a low damping effect is desired.
 
 To adjust these parameters, simply update the `config.json` file or pass them directly as arguments when running the script:
 ```bash
