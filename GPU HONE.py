@@ -4,64 +4,83 @@ import networkx as nx
 
 def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
-    GPU-accelerated version of Harmonic Oscillator Network Embedding (HONE) using CuPy.
-    Numerical integration follows the equation:
-        r_i^(t+1) = r_i^(t) - dt * sum(w_ij * (r_i^(t) - r_j^(t))), where w_ij is the weight of the edge.
+    Worker function for Harmonic Oscillator Network Embedding (HONE) in the overdamped limit.
 
     Parameters:
-        adj_matrix (cp.ndarray): Adjacency matrix of the network (weights as spring constants, w_ij).
-        dim (int): Dimensionality of the embedding space.
-        iterations (int): Maximum number of iterations for the embedding process.
-        tol (float): Convergence threshold for the total movement of positions.
-        seed (int): Random seed for reproducibility.
-        dt (float): Time step for numerical integration.
-        gamma (float): Damping coefficient (not explicitly used here due to direct position updates).
+        adj_matrix (np.ndarray): Adjacency matrix (weights as spring constants).
+        dim (int): Number of embedding dimensions.
+        iterations (int): Maximum number of iterations.
+        tol (float): Convergence threshold.
+        seed (int): Random seed.
+        dt (float): Time step.
+        gamma (float): Damping coefficient for the overdamped dynamics.
 
     Returns:
         tuple:
-            - positions (cp.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
-            - distances (cp.ndarray): Pairwise distances between nodes in the final embedding (shape: num_nodes x num_nodes).
+            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
+            - distances (np.ndarray): Pairwise node distances in the final embedding (shape: num_nodes x num_nodes).
     """
-    # Set the random seed for reproducibility
-    cp.random.seed(seed)
+    np.random.seed(seed)  # Set the random seed for reproducibility
+    num_nodes = adj_matrix.shape[0]  # Number of nodes in the graph
 
-    num_nodes = adj_matrix.shape[0]
+    # Initialize positions randomly in the embedding space with small perturbations
+    positions = np.random.rand(num_nodes, dim) * 0.1
+    optimal_distances = np.copy(adj_matrix)  # Initialize optimal distances as adjacency weights
 
-    # Initialize positions randomly within the embedding space
-    positions = cp.random.rand(num_nodes, dim) * 0.1
-
-    def calculate_forces(positions):
+    def compute_optimal_distances(positions):
         """
-        GPU-accelerated force calculation based on adjacency matrix.
-
-        Parameters:
-            positions (cp.ndarray): Current positions of nodes (num_nodes x dim).
-
-        Returns:
-            cp.ndarray: Forces acting on each node (num_nodes x dim).
+        Compute optimal distances based on the gradient of the energy landscape.
         """
-        # Compute weighted displacements for all nodes simultaneously
-        forces = -cp.matmul(adj_matrix, positions) + cp.sum(adj_matrix, axis=1, keepdims=True) * positions
+        nonlocal optimal_distances
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if adj_matrix[i, j] > 0:  # Only consider connected nodes
+                    k_ij = adj_matrix[i, j]  # Spring constant (weight of the edge)
+                    r_ij = np.linalg.norm(positions[j] - positions[i])  # Current distance
+                    gradient = -k_ij * (r_ij - optimal_distances[i, j])  # Gradient of the energy
+                    optimal_distances[i, j] = r_ij - gradient / k_ij  # Update optimal distance
+        return optimal_distances
+
+    def compute_forces(positions, optimal_distances):
+        """
+        Calculate forces acting on each node based on the harmonic oscillator model.
+        """
+        forces = np.zeros_like(positions)  # Initialize forces
+        for i in range(num_nodes):
+            for j in range(num_nodes):
+                if adj_matrix[i, j] > 0:  # Only consider connected nodes
+                    k_ij = adj_matrix[i, j]  # Spring constant
+                    r_ij = positions[j] - positions[i]  # Vector distance
+                    distance = np.linalg.norm(r_ij)  # Scalar distance
+                    unit_vector = r_ij / distance if distance != 0 else np.zeros_like(r_ij)
+
+                    # Compute restoring force based on the optimal distance
+                    force_magnitude = -k_ij * (distance - optimal_distances[i, j])
+                    forces[i] += force_magnitude * unit_vector
         return forces
 
-    # Iterative numerical integration process
+    # Simulation loop
     for _ in range(iterations):
-        # Compute forces for the current positions
-        forces = calculate_forces(positions)
+        # Step 1: Compute optimal distances
+        optimal_distances = compute_optimal_distances(positions)
 
-        # Update positions based on the given equation
-        new_positions = positions - dt * forces
+        # Step 2: Compute forces
+        forces = compute_forces(positions, optimal_distances)
 
-        # Check convergence: If total movement is below the tolerance, stop early
-        total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
-        if total_movement < tol:
+        # Step 3: Update positions using overdamped dynamics
+        new_positions = positions - (forces / gamma) * dt
+
+        # Step 4: Check convergence
+        total_movement = np.sum(np.linalg.norm(new_positions - positions, axis=1))
+        if total_movement < tol:  # Stop if total movement is below the threshold
             break
 
         # Update positions for the next iteration
         positions = new_positions
 
-    # Compute the pairwise distances in the final embedding
-    distances = cp.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=2)
+    # Calculate the pairwise distances between final positions
+    distances = np.linalg.norm(positions[:, None] - positions[None, :], axis=2)
+
     return positions, distances
 
 def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
