@@ -4,10 +4,10 @@ import networkx as nx
 
 def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
-    Worker function for Harmonic Oscillator Network Embedding (HONE) in the overdamped limit.
+    GPU-based worker function for Harmonic Oscillator Network Embedding (HONE) in the overdamped limit.
 
     Parameters:
-        adj_matrix (np.ndarray): Adjacency matrix (weights as spring constants).
+        adj_matrix (cp.ndarray): Adjacency matrix (weights as spring constants) on the GPU.
         dim (int): Number of embedding dimensions.
         iterations (int): Maximum number of iterations.
         tol (float): Convergence threshold.
@@ -17,15 +17,15 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
 
     Returns:
         tuple:
-            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
-            - distances (np.ndarray): Pairwise node distances in the final embedding (shape: num_nodes x num_nodes).
+            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim, on CPU).
+            - distances (np.ndarray): Pairwise node distances in the final embedding (shape: num_nodes x num_nodes, on CPU).
     """
-    np.random.seed(seed)  # Set the random seed for reproducibility
+    cp.random.seed(seed)  # Set the random seed for reproducibility
     num_nodes = adj_matrix.shape[0]  # Number of nodes in the graph
 
-    # Initialize positions randomly in the embedding space with small perturbations
-    positions = np.random.rand(num_nodes, dim) * 0.1
-    optimal_distances = np.copy(adj_matrix)  # Initialize optimal distances as adjacency weights
+    # Initialize positions randomly on the GPU with small perturbations
+    positions = cp.random.rand(num_nodes, dim) * 0.1
+    optimal_distances = adj_matrix.copy()  # Initialize optimal distances as adjacency weights
 
     def compute_optimal_distances(positions):
         """
@@ -36,7 +36,7 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
             for j in range(num_nodes):
                 if adj_matrix[i, j] > 0:  # Only consider connected nodes
                     k_ij = adj_matrix[i, j]  # Spring constant (weight of the edge)
-                    r_ij = np.linalg.norm(positions[j] - positions[i])  # Current distance
+                    r_ij = cp.linalg.norm(positions[j] - positions[i])  # Current distance
                     gradient = -k_ij * (r_ij - optimal_distances[i, j])  # Gradient of the energy
                     optimal_distances[i, j] = r_ij - gradient / k_ij  # Update optimal distance
         return optimal_distances
@@ -45,14 +45,14 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         """
         Calculate forces acting on each node based on the harmonic oscillator model.
         """
-        forces = np.zeros_like(positions)  # Initialize forces
+        forces = cp.zeros_like(positions)  # Initialize forces
         for i in range(num_nodes):
             for j in range(num_nodes):
                 if adj_matrix[i, j] > 0:  # Only consider connected nodes
                     k_ij = adj_matrix[i, j]  # Spring constant
                     r_ij = positions[j] - positions[i]  # Vector distance
-                    distance = np.linalg.norm(r_ij)  # Scalar distance
-                    unit_vector = r_ij / distance if distance != 0 else np.zeros_like(r_ij)
+                    distance = cp.linalg.norm(r_ij)  # Scalar distance
+                    unit_vector = r_ij / distance if distance != 0 else cp.zeros_like(r_ij)
 
                     # Compute restoring force based on the optimal distance
                     force_magnitude = -k_ij * (distance - optimal_distances[i, j])
@@ -71,7 +71,7 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         new_positions = positions - (forces / gamma) * dt
 
         # Step 4: Check convergence
-        total_movement = np.sum(np.linalg.norm(new_positions - positions, axis=1))
+        total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
         if total_movement < tol:  # Stop if total movement is below the threshold
             break
 
@@ -79,9 +79,11 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         positions = new_positions
 
     # Calculate the pairwise distances between final positions
-    distances = np.linalg.norm(positions[:, None] - positions[None, :], axis=2)
+    distances = cp.linalg.norm(positions[:, None] - positions[None, :], axis=2)
 
-    return positions, distances
+    # Convert results back to CPU
+    return cp.asnumpy(positions), cp.asnumpy(distances)
+
 
 def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
     """
