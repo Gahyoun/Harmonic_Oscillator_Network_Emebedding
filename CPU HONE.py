@@ -2,10 +2,6 @@ import numpy as np
 import networkx as nx
 from concurrent.futures import ThreadPoolExecutor
 
-import numpy as np
-import networkx as nx
-from concurrent.futures import ThreadPoolExecutor
-
 def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
     Worker function for Harmonic Oscillator Network Embedding (HONE) in the overdamped limit.
