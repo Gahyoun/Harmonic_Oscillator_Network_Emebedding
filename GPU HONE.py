@@ -1,31 +1,30 @@
-import numpy as np
 import cupy as cp
 import networkx as nx
 
-def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
+def HONE_worker_gpu(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
-    GPU-based worker function for Harmonic Oscillator Network Embedding (HONE) in the overdamped limit.
+    GPU-accelerated worker function for Harmonic Oscillator Network Embedding (HONE).
 
     Parameters:
-        adj_matrix (cp.ndarray): Adjacency matrix (weights as spring constants) on the GPU.
+        adj_matrix (cp.ndarray): Adjacency matrix stored in GPU memory.
         dim (int): Number of embedding dimensions.
         iterations (int): Maximum number of iterations.
         tol (float): Convergence threshold.
         seed (int): Random seed.
         dt (float): Time step.
-        gamma (float): Damping coefficient for the overdamped dynamics.
+        gamma (float): Damping coefficient.
 
     Returns:
         tuple:
-            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim, on CPU).
-            - distances (np.ndarray): Pairwise node distances in the final embedding (shape: num_nodes x num_nodes, on CPU).
+            - positions (cp.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
+            - distances (cp.ndarray): Pairwise node distances in the final embedding (shape: num_nodes x num_nodes).
     """
-    cp.random.seed(seed)  # Set the random seed for reproducibility
-    num_nodes = adj_matrix.shape[0]  # Number of nodes in the graph
+    cp.random.seed(seed)  # Random seed for reproducibility
+    num_nodes = adj_matrix.shape[0]  # Number of nodes
 
-    # Initialize positions randomly on the GPU with small perturbations
+    # Initialize positions randomly on GPU
     positions = cp.random.rand(num_nodes, dim) * 0.1
-    optimal_distances = adj_matrix.copy()  # Initialize optimal distances as adjacency weights
+    optimal_distances = cp.copy(adj_matrix)  # Initialize optimal distances
 
     def compute_optimal_distances(positions):
         """
@@ -34,96 +33,85 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         nonlocal optimal_distances
         for i in range(num_nodes):
             for j in range(num_nodes):
-                if adj_matrix[i, j] > 0:  # Only consider connected nodes
-                    k_ij = adj_matrix[i, j]  # Spring constant (weight of the edge)
-                    r_ij = cp.linalg.norm(positions[j] - positions[i])  # Current distance
-                    gradient = -k_ij * (r_ij - optimal_distances[i, j])  # Gradient of the energy
-                    optimal_distances[i, j] = r_ij - gradient / k_ij  # Update optimal distance
+                if adj_matrix[i, j] > 0:
+                    k_ij = adj_matrix[i, j]
+                    r_ij = cp.linalg.norm(positions[j] - positions[i])
+                    gradient = -k_ij * (r_ij - optimal_distances[i, j])
+                    optimal_distances[i, j] = r_ij - gradient / k_ij
         return optimal_distances
 
     def compute_forces(positions, optimal_distances):
         """
-        Calculate forces acting on each node based on the harmonic oscillator model.
+        Calculate forces on each node based on the harmonic oscillator model.
         """
-        forces = cp.zeros_like(positions)  # Initialize forces
+        forces = cp.zeros_like(positions)
         for i in range(num_nodes):
             for j in range(num_nodes):
-                if adj_matrix[i, j] > 0:  # Only consider connected nodes
-                    k_ij = adj_matrix[i, j]  # Spring constant
-                    r_ij = positions[j] - positions[i]  # Vector distance
-                    distance = cp.linalg.norm(r_ij)  # Scalar distance
+                if adj_matrix[i, j] > 0:
+                    k_ij = adj_matrix[i, j]
+                    r_ij = positions[j] - positions[i]
+                    distance = cp.linalg.norm(r_ij)
                     unit_vector = r_ij / distance if distance != 0 else cp.zeros_like(r_ij)
 
-                    # Compute restoring force based on the optimal distance
+                    # Compute restoring force
                     force_magnitude = -k_ij * (distance - optimal_distances[i, j])
                     forces[i] += force_magnitude * unit_vector
         return forces
 
     # Simulation loop
     for _ in range(iterations):
-        # Step 1: Compute optimal distances
         optimal_distances = compute_optimal_distances(positions)
-
-        # Step 2: Compute forces
         forces = compute_forces(positions, optimal_distances)
 
-        # Step 3: Update positions using overdamped dynamics
-        new_positions = positions - (forces / gamma) * dt
+        # Update positions with overdamped dynamics
+        new_positions = positions - (forces / float(gamma)) * dt
 
-        # Step 4: Check convergence
+        # Check convergence
         total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
-        if total_movement < tol:  # Stop if total movement is below the threshold
+        if total_movement < tol:
             break
 
-        # Update positions for the next iteration
         positions = new_positions
 
-    # Calculate the pairwise distances between final positions
+    # Compute pairwise distances
     distances = cp.linalg.norm(positions[:, None] - positions[None, :], axis=2)
 
-    # Convert results back to CPU
-    return cp.asnumpy(positions), cp.asnumpy(distances)
+    return positions, distances
 
-
-def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
+def HONE_gpu(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
     """
-    Perform Harmonic Oscillator Network Embedding (HONE) using GPU-based overdamped dynamics.
+    GPU-based Harmonic Oscillator Network Embedding (HONE) for a given graph.
 
     Parameters:
-        G (networkx.Graph): Input graph to be embedded.
-        dim (int): Number of dimensions for the embedding space.
-        iterations (int): Maximum number of iterations for the embedding process.
-        seed_ensemble (int): Number of random initializations (seeds) for ensemble calculation.
-        tol (float): Convergence tolerance for the total movement of positions.
-        dt (float): Time step for the integration process.
-        gamma (float): Damping coefficient for the overdamped dynamics.
+        G (networkx.Graph): Input graph.
+        dim (int): Number of embedding dimensions.
+        iterations (int): Maximum number of iterations.
+        seed_ensemble (int): Number of random initializations.
+        tol (float): Convergence tolerance.
+        dt (float): Time step.
+        gamma (float): Damping coefficient.
 
     Returns:
         tuple:
-            - ensemble_positions (list of np.ndarray): List of node positions for each ensemble (length: seed_ensemble).
-            - distance_matrices (np.ndarray): Array of pairwise distance matrices for each ensemble (shape: seed_ensemble x num_nodes x num_nodes).
+            - ensemble_positions (list of cp.ndarray): List of node positions for each ensemble.
+            - distance_matrices (cp.ndarray): Array of pairwise distance matrices (shape: seed_ensemble x num_nodes x num_nodes).
     """
-    # Convert the graph to an adjacency matrix and move it to the GPU
-    adj_matrix = cp.asarray(nx.to_numpy_array(G, weight="weight"))
-    if not nx.is_weighted(G):
-        adj_matrix[adj_matrix > 0] = 1  # Convert to binary adjacency for unweighted graphs
+    # Convert adjacency matrix to CuPy array
+    if nx.is_weighted(G):
+        adj_matrix = cp.asarray(nx.to_numpy_array(G, weight="weight"))
+    else:
+        adj_matrix = cp.asarray(nx.to_numpy_array(G))
+        adj_matrix[adj_matrix > 0] = 1  
 
-    # Create a list of CUDA streams for asynchronous execution
-    streams = [cp.cuda.Stream(non_blocking=True) for _ in range(seed_ensemble)]
-    results = [None] * seed_ensemble  # Preallocate results array
+    # GPU execution
+    results = [HONE_worker_gpu(adj_matrix, dim, iterations, tol, seed, dt, float(gamma)) for seed in range(seed_ensemble)]
 
-    # Launch HONE_worker for each seed using separate CUDA streams
-    for seed, stream in zip(range(seed_ensemble), streams):
-        results[seed] = HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream)
-
-    # Wait for all CUDA streams to finish execution
-    cp.cuda.Stream.null.synchronize()
-
-    # Extract results from the GPU
+    # Extract node positions and distance matrices
     ensemble_positions = [result[0] for result in results]
-    distance_matrices = np.array([result[1] for result in results])
+    distance_matrices = cp.array([result[1] for result in results])
 
     return ensemble_positions, distance_matrices
+
 
 def HNI(distance_matrices):
     """
