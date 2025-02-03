@@ -2,69 +2,67 @@ import numpy as np
 import cupy as cp
 import networkx as nx
 
-def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream):
+def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
-    Worker function for Harmonic Oscillator Network Embedding (HONE) using overdamped dynamics with CUDA streams.
+    GPU-accelerated version of Harmonic Oscillator Network Embedding (HONE) using CuPy.
+    Numerical integration follows the equation:
+        r_i^(t+1) = r_i^(t) - dt * sum(w_ij * (r_i^(t) - r_j^(t))), where w_ij is the weight of the edge.
 
     Parameters:
-        adj_matrix (cp.ndarray): Adjacency matrix of the network, stored on the GPU.
-        dim (int): Number of dimensions for the embedding space.
-        iterations (int): Maximum number of iterations to run the embedding process.
-        tol (float): Convergence tolerance for the total movement of positions.
-        seed (int): Random seed for initializing positions.
-        dt (float): Time step for the integration process.
-        gamma (float): Damping coefficient for the overdamped dynamics.
-        stream (cp.cuda.Stream): CUDA stream to allow asynchronous GPU operations.
+        adj_matrix (cp.ndarray): Adjacency matrix of the network (weights as spring constants, w_ij).
+        dim (int): Dimensionality of the embedding space.
+        iterations (int): Maximum number of iterations for the embedding process.
+        tol (float): Convergence threshold for the total movement of positions.
+        seed (int): Random seed for reproducibility.
+        dt (float): Time step for numerical integration.
+        gamma (float): Damping coefficient (not explicitly used here due to direct position updates).
 
     Returns:
         tuple:
-            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
-            - distances (np.ndarray): Pairwise distances between nodes in the final embedding (shape: num_nodes x num_nodes).
+            - positions (cp.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
+            - distances (cp.ndarray): Pairwise distances between nodes in the final embedding (shape: num_nodes x num_nodes).
     """
-    with stream:  # Activate the CUDA stream
-        # Set the random seed for reproducibility on the GPU
-        cp.random.seed(seed)
+    # Set the random seed for reproducibility
+    cp.random.seed(seed)
 
-        # Initialize positions randomly in the embedding space
-        positions = cp.random.rand(adj_matrix.shape[0], dim)
+    num_nodes = adj_matrix.shape[0]
 
-        def calculate_forces(positions):
-            """
-            Calculate forces based on the harmonic oscillator model using GPU computations.
+    # Initialize positions randomly within the embedding space
+    positions = cp.random.rand(num_nodes, dim) * 0.1
 
-            Parameters:
-                positions (cp.ndarray): Current positions of nodes in the embedding space.
+    def calculate_forces(positions):
+        """
+        GPU-accelerated force calculation based on adjacency matrix.
 
-            Returns:
-                cp.ndarray: Forces acting on each node (shape: num_nodes x dim).
-            """
-            forces = cp.zeros_like(positions)
-            for i in range(len(positions)):
-                # Calculate displacement vectors from node i to all other nodes
-                delta = positions - positions[i]
-                # Mask to avoid division by zero (self-loops)
-                mask = cp.arange(len(positions)) != i
-                # Compute forces based on adjacency matrix and displacement vectors
-                forces[i] = cp.sum(adj_matrix[i, mask][:, None] * delta[mask], axis=0)
-            return forces
+        Parameters:
+            positions (cp.ndarray): Current positions of nodes (num_nodes x dim).
 
-        # Iterative integration process
-        for _ in range(iterations):
-            # Calculate forces for the current positions
-            forces = calculate_forces(positions)
-            # Update positions based on overdamped dynamics
-            new_positions = positions + (forces / gamma) * dt
-            # Calculate total movement to check for convergence
-            total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
-            if total_movement < tol:  # Convergence condition
-                break
-            # Update positions for the next iteration
-            positions = new_positions
+        Returns:
+            cp.ndarray: Forces acting on each node (num_nodes x dim).
+        """
+        # Compute weighted displacements for all nodes simultaneously
+        forces = -cp.matmul(adj_matrix, positions) + cp.sum(adj_matrix, axis=1, keepdims=True) * positions
+        return forces
 
-        # Calculate the pairwise distances in the final embedding
-        distances = cp.linalg.norm(positions[:, None] - positions[None, :], axis=2)
-        # Convert GPU results to CPU-friendly numpy arrays
-        return cp.asnumpy(positions), cp.asnumpy(distances)
+    # Iterative numerical integration process
+    for _ in range(iterations):
+        # Compute forces for the current positions
+        forces = calculate_forces(positions)
+
+        # Update positions based on the given equation
+        new_positions = positions - dt * forces
+
+        # Check convergence: If total movement is below the tolerance, stop early
+        total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
+        if total_movement < tol:
+            break
+
+        # Update positions for the next iteration
+        positions = new_positions
+
+    # Compute the pairwise distances in the final embedding
+    distances = cp.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=2)
+    return positions, distances
 
 def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
     """
