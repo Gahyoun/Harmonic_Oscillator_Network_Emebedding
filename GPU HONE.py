@@ -1,5 +1,6 @@
 import cupy as cp
 import networkx as nx
+import numpy as np
 
 def HONE_worker_gpu(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
