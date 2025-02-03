@@ -4,16 +4,18 @@ from concurrent.futures import ThreadPoolExecutor
 
 def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
-    Worker function for Harmonic Oscillator Network Embedding (HONE) using overdamped dynamics on the CPU.
-
+    Worker function for Harmonic Oscillator Network Embedding (HONE) using overdamped dynamics.
+    Numerical integration follows the equation:
+        r_i^(t+1) = r_i^(t) - dt * sum(w_ij * (r_i^(t) - r_j^(t))), where w_ij is the weight of the edge.
+    
     Parameters:
-        adj_matrix (np.ndarray): Adjacency matrix of the network.
-        dim (int): Number of dimensions for the embedding space.
-        iterations (int): Maximum number of iterations to run the embedding process.
-        tol (float): Convergence tolerance for the total movement of positions.
-        seed (int): Random seed for initialization.
-        dt (float): Time step for the integration process.
-        gamma (float): Damping coefficient for the overdamped dynamics.
+        adj_matrix (np.ndarray): Adjacency matrix of the network, where weights represent spring constants (w_ij).
+        dim (int): Dimensionality of the embedding space.
+        iterations (int): Maximum number of iterations for the embedding process.
+        tol (float): Convergence threshold for the total movement of positions.
+        seed (int): Random seed for reproducibility.
+        dt (float): Time step for numerical integration.
+        gamma (float): Damping coefficient (not explicitly used here due to direct position updates).
 
     Returns:
         tuple:
@@ -22,47 +24,49 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     """
     # Set the random seed for reproducibility
     np.random.seed(seed)
+    
+    num_nodes = adj_matrix.shape[0]
 
-    # Initialize positions randomly in the embedding space
-    positions = np.random.rand(adj_matrix.shape[0], dim)
+    # Initialize positions randomly within the embedding space
+    positions = np.random.rand(num_nodes, dim)
 
     def calculate_forces(positions):
         """
-        Calculate forces based on the harmonic oscillator model.
+        Calculate the sum of weighted displacements for each node based on the adjacency matrix.
 
         Parameters:
-            positions (np.ndarray): Current positions of nodes in the embedding space.
+            positions (np.ndarray): Current positions of nodes (num_nodes x dim).
 
         Returns:
-            np.ndarray: Forces acting on each node (shape: num_nodes x dim).
+            np.ndarray: Forces acting on each node (num_nodes x dim).
         """
         forces = np.zeros_like(positions)
-        for i in range(len(positions)):
-            # Calculate displacement vectors from node i to all other nodes
-            delta = positions - positions[i]
-            # Mask to avoid division by zero (self-loops)
-            mask = np.arange(len(positions)) != i
-            # Compute forces based on the adjacency matrix and displacement vectors
-            forces[i] = np.sum(
-                adj_matrix[i, mask][:, None] * delta[mask],
-                axis=0
-            )
+        for i in range(num_nodes):
+            # Compute displacements between node i and all neighbors
+            neighbors = adj_matrix[i] > 0
+            displacements = positions[neighbors] - positions[i]  # Displacement vectors
+            weights = adj_matrix[i, neighbors]  # Corresponding weights (w_ij)
+            # Sum weighted displacements
+            forces[i] = np.sum(weights[:, None] * displacements, axis=0)
         return forces
 
-    # Iterative integration process
+    # Iterative numerical integration process
     for _ in range(iterations):
-        # Calculate forces for the current positions
+        # Compute forces for the current positions
         forces = calculate_forces(positions)
-        # Update positions based on overdamped dynamics
-        new_positions = positions + (forces / gamma) * dt
-        # Calculate total movement to check convergence
+        
+        # Update positions based on the given equation
+        new_positions = positions - dt * forces
+        
+        # Check convergence: If total movement is below the tolerance, stop early
         total_movement = np.sum(np.linalg.norm(new_positions - positions, axis=1))
-        if total_movement < tol:  # Convergence condition
+        if total_movement < tol:
             break
+        
         # Update positions for the next iteration
         positions = new_positions
 
-    # Calculate the pairwise distances in the final embedding
+    # Compute the pairwise distances in the final embedding
     distances = np.linalg.norm(positions[:, None] - positions[None, :], axis=2)
     return positions, distances
 
