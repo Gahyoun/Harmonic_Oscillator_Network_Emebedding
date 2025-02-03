@@ -25,9 +25,8 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream):
         # Set the random seed for reproducibility on the GPU
         cp.random.seed(seed)
 
-        # Initialize positions randomly in the embedding space and velocities to zero
+        # Initialize positions randomly in the embedding space
         positions = cp.random.rand(adj_matrix.shape[0], dim)
-        velocities = cp.zeros_like(positions)
 
         def calculate_forces(positions):
             """
@@ -43,25 +42,18 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream):
             for i in range(len(positions)):
                 # Calculate displacement vectors from node i to all other nodes
                 delta = positions - positions[i]
-                # Compute distances between node i and others
-                distances = cp.linalg.norm(delta, axis=1)
                 # Mask to avoid division by zero (self-loops)
-                mask = distances > 1e-6
-                # Compute forces based on adjacency matrix and normalized displacements
-                forces[i] = cp.sum(
-                    adj_matrix[i, mask][:, None] * (delta[mask] / distances[mask, None]),
-                    axis=0
-                )
+                mask = cp.arange(len(positions)) != i
+                # Compute forces based on adjacency matrix and displacement vectors
+                forces[i] = cp.sum(adj_matrix[i, mask][:, None] * delta[mask], axis=0)
             return forces
 
         # Iterative integration process
         for _ in range(iterations):
             # Calculate forces for the current positions
             forces = calculate_forces(positions)
-            # Update velocities based on overdamped dynamics
-            velocities = -forces / gamma
-            # Update positions using the calculated velocities
-            new_positions = positions + velocities * dt
+            # Update positions based on overdamped dynamics
+            new_positions = positions + (forces / gamma) * dt
             # Calculate total movement to check for convergence
             total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
             if total_movement < tol:  # Convergence condition
