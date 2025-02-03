@@ -28,9 +28,6 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     optimal_distances = np.copy(adj_matrix)  # Initialize optimal distances as adjacency weights
 
     def compute_optimal_distances(positions):
-        """
-        Compute optimal distances based on the gradient of the energy landscape.
-        """
         nonlocal optimal_distances
         for i in range(num_nodes):
             for j in range(num_nodes):
@@ -42,9 +39,6 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         return optimal_distances
 
     def compute_forces(positions, optimal_distances):
-        """
-        Calculate forces acting on each node based on the harmonic oscillator model.
-        """
         forces = np.zeros_like(positions)  # Initialize forces
         for i in range(num_nodes):
             for j in range(num_nodes):
@@ -61,21 +55,17 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
 
     # Simulation loop
     for _ in range(iterations):
-        # Step 1: Compute optimal distances
         optimal_distances = compute_optimal_distances(positions)
-
-        # Step 2: Compute forces
         forces = compute_forces(positions, optimal_distances)
 
-        # Step 3: Update positions using overdamped dynamics
-        new_positions = positions - (forces / gamma) * dt
+        # Update positions using overdamped dynamics
+        new_positions = positions - (forces / float(gamma)) * dt  # Ensure gamma is treated as float
 
-        # Step 4: Check convergence
+        # Check convergence
         total_movement = np.sum(np.linalg.norm(new_positions - positions, axis=1))
-        if total_movement < tol:  # Stop if total movement is below the threshold
+        if total_movement < tol:
             break
 
-        # Update positions for the next iteration
         positions = new_positions
 
     # Calculate the pairwise distances between final positions
@@ -101,29 +91,27 @@ def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1
             - ensemble_positions (list of np.ndarray): List of node positions for each ensemble (length: seed_ensemble).
             - distance_matrices (np.ndarray): Array of pairwise distance matrices for each ensemble (shape: seed_ensemble x num_nodes x num_nodes).
     """
-    # Convert the graph to an adjacency matrix (weighted or unweighted)
     if nx.is_weighted(G):
         adj_matrix = np.asarray(nx.to_numpy_array(G, weight="weight"))
     else:
         adj_matrix = np.asarray(nx.to_numpy_array(G))
-        adj_matrix[adj_matrix > 0] = 1  # Convert to unweighted if needed
+        adj_matrix[adj_matrix > 0] = 1  
 
     results = [None] * seed_ensemble
 
-    # Use multithreading for parallel processing of ensemble calculations
     with ThreadPoolExecutor() as executor:
         futures = [
-            executor.submit(HONE_worker, adj_matrix, dim, iterations, tol, seed, dt, gamma)
+            executor.submit(HONE_worker, adj_matrix, dim, iterations, tol, seed, dt, float(gamma))  # Ensure gamma is float
             for seed in range(seed_ensemble)
         ]
         for i, future in enumerate(futures):
             results[i] = future.result()
 
-    # Extract node positions and distance matrices from the results
     ensemble_positions = [result[0] for result in results]
     distance_matrices = np.array([result[1] for result in results])
 
     return ensemble_positions, distance_matrices
+
 
 def HNI(distance_matrices):
     """
