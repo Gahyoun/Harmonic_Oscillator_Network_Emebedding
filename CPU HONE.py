@@ -23,9 +23,8 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     # Set the random seed for reproducibility
     np.random.seed(seed)
 
-    # Initialize positions randomly in the embedding space and velocities to zero
+    # Initialize positions randomly in the embedding space
     positions = np.random.rand(adj_matrix.shape[0], dim)
-    velocities = np.zeros_like(positions)
 
     def calculate_forces(positions):
         """
@@ -41,13 +40,11 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         for i in range(len(positions)):
             # Calculate displacement vectors from node i to all other nodes
             delta = positions - positions[i]
-            # Compute distances between node i and others
-            distances = np.linalg.norm(delta, axis=1)
             # Mask to avoid division by zero (self-loops)
-            mask = distances > 1e-6
-            # Compute forces based on the adjacency matrix and normalized displacements
+            mask = np.arange(len(positions)) != i
+            # Compute forces based on the adjacency matrix and displacement vectors
             forces[i] = np.sum(
-                adj_matrix[i, mask][:, None] * (delta[mask] / distances[mask, None]),
+                adj_matrix[i, mask][:, None] * delta[mask],
                 axis=0
             )
         return forces
@@ -56,10 +53,8 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
     for _ in range(iterations):
         # Calculate forces for the current positions
         forces = calculate_forces(positions)
-        # Update velocities based on overdamped dynamics
-        velocities = -forces / gamma
-        # Update positions using the calculated velocities
-        new_positions = positions + velocities * dt
+        # Update positions based on overdamped dynamics
+        new_positions = positions + (forces / gamma) * dt
         # Calculate total movement to check convergence
         total_movement = np.sum(np.linalg.norm(new_positions - positions, axis=1))
         if total_movement < tol:  # Convergence condition
