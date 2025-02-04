@@ -20,46 +20,43 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
             - positions (np.ndarray): Final positions of nodes in embedding space (shape: num_nodes x dim).
             - distances (np.ndarray): Pairwise node distances in final embedding (shape: num_nodes x num_nodes).
     """
-    np.random.seed(seed)  # Set random seed for reproducibility
-    num_nodes = adj_matrix.shape[0]  # Number of nodes in the network
+    np.random.seed(seed)  
+    num_nodes = adj_matrix.shape[0]  
 
     # Normalize adjacency matrix weights to avoid numerical instability
-    max_weight = np.max(adj_matrix)
-    if max_weight > 0:
-        adj_matrix = adj_matrix / max_weight
+    total_weight = np.sum(adj_matrix)
+    if total_weight > 0:
+        adj_matrix = adj_matrix / total_weight
 
     # Initialize node positions with small perturbations
     positions = np.random.rand(num_nodes, dim)
-    optimal_distances = np.copy(adj_matrix)  # Initialize optimal distances using adjacency weights
+    optimal_distances = np.copy(adj_matrix)
 
     def compute_optimal_distances(positions):
         """ Compute the optimal distances between nodes based on network structure. """
         nonlocal optimal_distances
         for i in range(num_nodes):
             for j in range(num_nodes):
-                if adj_matrix[i, j] > 0:  # Only process connected nodes
-                    k_ij = adj_matrix[i, j]  # Spring constant (edge weight)
-                    r_ij = np.linalg.norm(positions[j] - positions[i])  # Current node distance
-                    gradient = -k_ij * (r_ij - optimal_distances[i, j])  # Gradient of energy function
-                    optimal_distances[i, j] = r_ij - gradient / k_ij  # Update optimal distance
+                if adj_matrix[i, j] > 0:  
+                    k_ij = adj_matrix[i, j]  
+                    r_ij = np.linalg.norm(positions[j] - positions[i])  
+                    gradient = -k_ij * (r_ij - optimal_distances[i, j])  
+                    optimal_distances[i, j] = r_ij - gradient / k_ij  
         return optimal_distances
 
     def compute_forces(positions, optimal_distances):
         """ Compute restoring forces acting on each node based on the spring model. """
-        forces = np.zeros_like(positions)  # Initialize forces array
+        forces = np.zeros_like(positions)  
         for i in range(num_nodes):
             for j in range(num_nodes):
-                if adj_matrix[i, j] > 0:  # Only consider connected nodes
-                    k_ij = adj_matrix[i, j]  # Spring constant
-                    r_ij = positions[j] - positions[i]  # Vector displacement
-                    distance = np.linalg.norm(r_ij)  # Scalar distance
+                if adj_matrix[i, j] > 0:  
+                    k_ij = adj_matrix[i, j]  
+                    r_ij = positions[j] - positions[i]  
+                    distance = np.linalg.norm(r_ij)  
 
-                    # Avoid division by zero when calculating unit vector
                     unit_vector = r_ij / distance if distance > 1e-6 else np.zeros_like(r_ij)
-
-                    # Compute force magnitude based on Hooke's Law
                     force_magnitude = -k_ij * (distance - optimal_distances[i, j])
-                    forces[i] += force_magnitude * unit_vector  # Apply force to node i
+                    forces[i] += force_magnitude * unit_vector  
         return forces
 
     # Iterative simulation loop for convergence
@@ -75,7 +72,7 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         if total_movement < tol:
             break
 
-        positions = new_positions  # Update positions for next iteration
+        positions = new_positions  
 
     # Compute final pairwise distances between nodes
     distances = np.linalg.norm(positions[:, None] - positions[None, :], axis=2)
@@ -103,12 +100,14 @@ def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1
     # Convert graph to weighted adjacency matrix
     if nx.is_weighted(G):
         adj_matrix = np.asarray(nx.to_numpy_array(G, weight="weight"))
-        max_weight = np.max(adj_matrix)
-        if max_weight > 0:
-            adj_matrix = adj_matrix / max_weight  # Normalize weights
     else:
         adj_matrix = np.asarray(nx.to_numpy_array(G))
-        adj_matrix[adj_matrix > 0] = 1  # Convert unweighted graph to binary adjacency matrix
+        adj_matrix[adj_matrix > 0] = 1  
+
+    # Normalize adjacency matrix by total weight sum
+    total_weight = np.sum(adj_matrix)
+    if total_weight > 0:
+        adj_matrix = adj_matrix / total_weight  
 
     results = [None] * seed_ensemble
 
@@ -139,7 +138,7 @@ def HNI(distance_matrices):
         float: Average variance of pairwise distances across ensembles.
     """
     # Compute variance of distances for each pair of nodes across ensembles
-    pairwise_variances = np.var(distance_matrices, axis=0)  # Shape: (num_nodes x num_nodes)
+    pairwise_variances = np.var(distance_matrices, axis=0)  
 
     # Extract the upper triangular part of the variance matrix (excluding the diagonal)
     upper_tri_indices = np.triu_indices_from(pairwise_variances, k=1)
