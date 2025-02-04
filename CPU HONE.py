@@ -29,7 +29,7 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         adj_matrix = adj_matrix / max_weight
 
     # Initialize node positions with small perturbations
-    positions = np.random.rand(num_nodes, dim) * 0.1
+    positions = np.random.rand(num_nodes, dim)
     optimal_distances = np.copy(adj_matrix)  # Initialize optimal distances using adjacency weights
 
     def compute_optimal_distances(positions):
