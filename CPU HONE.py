@@ -66,10 +66,10 @@ def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma):
 
                     # ✅ Attraction: If distance > optimal distance, apply attractive force
                     # ✅ Repulsion: If distance < optimal distance, apply repulsive force
-                    if distance > optimal_distances[i, j]:
-                        force_magnitude = -k_ij * (distance - optimal_distances[i, j])  # Attraction
-                    else:
-                        force_magnitude = k_ij * (optimal_distances[i, j] - distance)  # Repulsion
+                    if distance > optimal_distances[i, j]:  # Attraction
+                        force_magnitude = - k_ij * (distance - optimal_distances[i, j])  
+                    else:  # Repulsion
+                        force_magnitude = + k_ij * (distance - optimal_distances[i, j])  
 
                     forces[i] += force_magnitude * unit_vector  
 
