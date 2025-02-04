@@ -30,7 +30,7 @@ def HONE_worker_gpu(adj_matrix, dim, iterations, tol, seed, dt, gamma):
         adj_matrix = adj_matrix / max_weight
 
     # Initialize node positions with small perturbations (on GPU)
-    positions = cp.random.rand(num_nodes, dim) * 0.1
+    positions = cp.random.rand(num_nodes, dim)
     optimal_distances = cp.copy(adj_matrix)  # Initialize optimal distances using adjacency weights
 
     def compute_optimal_distances(positions):
