@@ -1,9 +1,20 @@
 import cupy as cp
 from concurrent.futures import ProcessPoolExecutor
 
-def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
+def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None, 
+             energy_window=10, tolerance=1e-4, max_increase_steps=5):
     """
-    Harmonic Oscillator Network Embedding (HONE) - GPU Version using CuPy.
+    Harmonic Oscillator Network Embedding (HONE) - GPU Version with Energy Tracking.
+
+    Parameters:
+    - adj_matrix: Adjacency matrix (CuPy tensor)
+    - dim: Embedding dimension
+    - num_steps: Optimization steps
+    - learning_rate: Step size
+    - seed: Random seed
+    - energy_window: Energy increase monitoring window
+    - tolerance: Minimum energy increase to trigger stopping
+    - max_increase_steps: Allowed consecutive increases before stopping
     """
     if seed is not None:
         cp.random.seed(seed)
@@ -18,8 +29,20 @@ def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
     mask = (adj_matrix > 0) & (cp.arange(num_nodes)[:, None] != cp.arange(num_nodes))  # Ignore self-loops
     rest_lengths[mask] = 1 / adj_matrix[mask]
 
+    # Energy tracking
+    energy_history = []
+    consecutive_increase = 0
+
+    def compute_energy():
+        """Compute total system energy based on node positions."""
+        i, j = cp.where(adj_matrix > 0)
+        distances = cp.linalg.norm(positions[i] - positions[j], axis=1)
+        r_0 = rest_lengths[i, j]
+        energy = 0.5 * cp.sum((distances - r_0) ** 2)
+        return energy.item()
+
     # Gradient optimization loop
-    for _ in range(num_steps):
+    for step in range(num_steps):
         gradients = cp.zeros((num_nodes, dim))
 
         for node in range(num_nodes):
@@ -36,11 +59,28 @@ def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
         # Update positions using gradient descent
         positions -= learning_rate * gradients
 
+        # Compute energy after update
+        current_energy = compute_energy()
+        energy_history.append(current_energy)
+
+        # Check for consistent energy increase
+        if len(energy_history) > energy_window:
+            recent_energies = energy_history[-energy_window:]
+            if all(recent_energies[i] < recent_energies[i + 1] - tolerance for i in range(len(recent_energies) - 1)):
+                consecutive_increase += 1
+            else:
+                consecutive_increase = 0  # Reset if decrease or fluctuation occurs
+
+            # Stop if energy keeps increasing consistently
+            if consecutive_increase >= max_increase_steps:
+                print(f"⚠️ Optimization stopped early at step {step} due to continuous energy increase.")
+                break
+
     return positions
 
 def compute_distance_matrix(positions):
     """
-    Compute the Euclidean distance matrix for final node positions using CuPy.
+    Compute the Euclidean distance matrix using CuPy.
     """
     num_nodes = positions.shape[0]
     distance_matrix = cp.zeros((num_nodes, num_nodes))
@@ -54,7 +94,7 @@ def compute_distance_matrix(positions):
 
 def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
     """
-    Perform multiple independent runs of HONE in parallel using multiprocessing (CuPy-based GPU).
+    Perform multiple independent runs of HONE in parallel using GPU-accelerated CuPy.
     """
     results = [None] * seed_ensemble
 
@@ -67,10 +107,9 @@ def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_en
             results[i] = future.result()
 
     # Compute distance matrices for each embedding
-    ensemble_positions = results
     distance_matrices = cp.array([compute_distance_matrix(result) for result in results])
 
-    return ensemble_positions, distance_matrices
+    return results, distance_matrices
 
 def HNI(distance_matrices):
     """
