@@ -4,33 +4,35 @@ This framework treats networks like a system of connected oscillators:
 - **Nodes** are represented as round objects (particles).
 - **Edges** are modeled as springs connecting the nodes.
 
-Using classical mechanics principles, the **HONE framework** computes equilibrium configurations to map network topology while quantifying its complexity through the **Harmonic Network Inconsistency (HNI)** metric. 📈
+Using classical mechanics principles, the **HONE framework** computes equilibrium configurations to map network topology, minimizing the total potential energy through **gradient descent optimization**. This process aims to find optimal node positions in a lower-dimensional space. The **Harmonic Network Inconsistency (HNI)** metric is used to quantify network complexity and variability. 📈
 
 ---
-⚙️ Advanced Usage:
+⚙️ **Advanced Usage**:
 
 HONE provides a flexible interface for customization:
 
-- **`iterations`**: Set the number of iterations for the numerical solver.
-- **`dim`**: Define the dimensionality of the embedding space.
-- **`seed_ensemble`**: Control the number of ensemble runs to compute HNI.
-- **`dt`**: Adjust the time step for the dynamics.
-- **`gamma`**: Modify the damping coefficient for harmonic oscillations.
+- **`num_steps`**: Set the number of iterations for the gradient descent optimization process (default: 1000).
+- **`dim`**: Define the dimensionality of the embedding space (default: 2).
+- **`learning_rate`**: Adjust the learning rate for gradient descent updates (default: 0.01).
+- **`seed`**: Random seed for reproducibility in the **`HONE`** function (optional).
+- **`seed_ensemble`**: Number of ensemble runs to compute HNI (default: 10).
 
-> **⚠️ Note**: Avoid setting `gamma` to `0` or very low values to prevent numerical instability caused by floating-point errors. Choose small but non-zero values when a low damping effect is desired.
+> **⚠️ Note**: If additional dynamics like damping were to be introduced, avoid setting `gamma` to `0` or very low values to prevent numerical instability due to floating-point errors. Choose small, non-zero values for low damping effects.
 
 ---
 
-## 🌟 **Key Highlights**
+## 🌟 **Key Highlights**:
 1. **Dual Implementation**:
-   - **`GPU_HONE.py`**: Optimized for CUDA-enabled GPUs to accelerate computations.
-   - **`CPU_HONE.py`**: CPU-based version for systems without GPU support.
-2. **Node Dynamics**: Understand how individual nodes (particles) interact in a network.
-3. **Spring-like Edges**: Capture structural dependencies via harmonic couplings.
-4. **Global Perspective**: Analyze energy landscapes for insights into configurational variability.
-5. **Harmonic Network Inconsistency (HNI)**: Quantifies network complexity and variability.
+   - **`parallel_HONE.py`**: Optimized for parallel computation using multi-core processors, providing faster ensemble-based results.
+   - **`HONE.py`**: Single-process implementation of the harmonic oscillator network embedding.
+2. **Node Dynamics**: Understand how individual nodes (particles) interact in the network space.
+3. **Spring-like Edges**: Capture structural dependencies through harmonic spring couplings.
+4. **Global Perspective**: Analyze the energy landscape for insights into node configurations and network structure.
+5. **Harmonic Network Inconsistency (HNI)**: Quantifies the variability and consistency of network embeddings across multiple runs.
 
+---
 
+This framework uses **gradient descent optimization** to iteratively adjust node positions, minimizing the total potential energy. Each optimization step aligns the network with its structural dependencies, helping to uncover hidden patterns and complex relationships in large-scale networks.
 ---
 
 ## 🚀 **Getting Started**
