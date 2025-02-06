@@ -1,5 +1,4 @@
 from concurrent.futures import ThreadPoolExecutor
-import cupy as cp
 import numpy as np
 import networkx as nx
 
