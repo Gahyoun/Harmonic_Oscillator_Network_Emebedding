@@ -2,7 +2,7 @@ import cupy as cp
 import networkx as nx
 from concurrent.futures import ProcessPoolExecutor
 
-def HONE_GPU(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
+def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
     """
     Harmonic Oscillator Network Embedding (HONE) - GPU Accelerated Version
     
@@ -52,7 +52,7 @@ def HONE_GPU(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
 
     return positions
 
-def compute_distance_matrix_GPU(positions):
+def compute_distance_matrix(positions):
     """
     Compute the Euclidean distance matrix for final node positions using CuPy.
 
@@ -72,7 +72,7 @@ def compute_distance_matrix_GPU(positions):
 
     return distance_matrix
 
-def parallel_HONE_GPU(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
+def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
     """
     Perform multiple independent runs of HONE in parallel using multiprocessing and GPU acceleration.
 
@@ -92,10 +92,10 @@ def parallel_HONE_GPU(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, see
     # Convert adjacency matrix to CuPy
     adj_matrix = cp.asarray(adj_matrix)
 
-    # Run HONE_GPU in parallel using multiple processes
+    # Run HONE in parallel using multiple processes
     with ProcessPoolExecutor() as executor:
         futures = [
-            executor.submit(HONE_GPU, adj_matrix, dim, num_steps, learning_rate, seed)
+            executor.submit(HONE, adj_matrix, dim, num_steps, learning_rate, seed)
             for seed in range(seed_ensemble)
         ]
         for i, future in enumerate(futures):
@@ -103,11 +103,11 @@ def parallel_HONE_GPU(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, see
 
     # Extract node positions and compute distance matrices
     ensemble_positions = results
-    distance_matrices = cp.array([compute_distance_matrix_GPU(result) for result in results])
+    distance_matrices = cp.array([compute_distance_matrix(result) for result in results])
 
     return ensemble_positions, distance_matrices
 
-def HNI_GPU(distance_matrices):
+def HNI(distance_matrices):
     """
     Compute the Harmonic Network Inconsistency (HNI) value using CuPy.
 
