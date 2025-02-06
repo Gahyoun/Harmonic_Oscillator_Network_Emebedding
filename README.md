@@ -30,9 +30,7 @@ HONE provides a flexible interface for customization:
 4. **Global Perspective**: Analyze the energy landscape for insights into node configurations and network structure.
 5. **Harmonic Network Inconsistency (HNI)**: Quantifies the variability and consistency of network embeddings across multiple runs.
 
----
-
-This framework uses **gradient descent optimization** to iteratively adjust node positions, minimizing the total potential energy. Each optimization step aligns the network with its structural dependencies, helping to uncover hidden patterns and complex relationships in large-scale networks.
+   This framework uses **gradient descent optimization** to iteratively adjust node positions, minimizing the total potential energy. Each optimization step aligns the network with its structural dependencies, helping to uncover hidden patterns and complex relationships in large-scale networks.
 ---
 
 ## 🚀 **Getting Started**
