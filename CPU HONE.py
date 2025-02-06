@@ -1,111 +1,117 @@
+from concurrent.futures import ThreadPoolExecutor
+import cupy as cp
 import numpy as np
 import networkx as nx
-from concurrent.futures import ProcessPoolExecutor
 
-def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None):
+def HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream):
     """
-    Harmonic Oscillator Network Embedding (HONE)
-
-    This function embeds a network into a lower-dimensional space using a **spring-based gradient optimization** approach.
-    The method is inspired by Hooke's Law, where edges act as springs pulling connected nodes toward their equilibrium distances.
-
-    The optimization minimizes the total potential energy of the system using **gradient descent**.
+    Worker function for Harmonic Oscillator Network Embedding (HONE) using overdamped dynamics with CUDA streams.
 
     Parameters:
-        adj_matrix (np.ndarray): The adjacency matrix representing the network.
-        dim (int): The number of dimensions for the embedding space (default: 2).
-        num_steps (int): The number of optimization iterations (default: 1000).
-        learning_rate (float): The step size for gradient descent updates (default: 0.01).
-        seed (int, optional): Random seed for reproducibility (default: None).
+        adj_matrix (cp.ndarray): Adjacency matrix of the network, stored on the GPU.
+        dim (int): Number of dimensions for the embedding space.
+        iterations (int): Maximum number of iterations to run the embedding process.
+        tol (float): Convergence tolerance for the total movement of positions.
+        seed (int): Random seed for initializing positions.
+        dt (float): Time step for the integration process.
+        gamma (float): Damping coefficient for the overdamped dynamics.
+        stream (cp.cuda.Stream): CUDA stream to allow asynchronous GPU operations.
 
     Returns:
-        dict: Final node positions in the embedding space.
-              Keys are node indices, values are NumPy arrays of shape (dim,).
+        tuple:
+            - positions (np.ndarray): Final positions of nodes in the embedding space (shape: num_nodes x dim).
+            - distances (np.ndarray): Pairwise distances between nodes in the final embedding (shape: num_nodes x num_nodes).
     """
-    if seed is not None:
-        np.random.seed(seed)
+    with stream:  # Activate the CUDA stream
+        # Set the random seed for reproducibility on the GPU
+        cp.random.seed(seed)
 
-    num_nodes = adj_matrix.shape[0]
+        # Initialize positions randomly in the embedding space and velocities to zero
+        positions = cp.random.rand(adj_matrix.shape[0], dim)
+        velocities = cp.zeros_like(positions)
 
-    # Initialize random positions
-    positions = {node: np.random.rand(dim) for node in range(num_nodes)}
+        def calculate_forces(positions):
+            """
+            Calculate forces based on the harmonic oscillator model using GPU computations.
 
-    # Compute rest lengths (equilibrium distances) for edges (inverse of weights)
-    rest_lengths = {}
-    for i in range(num_nodes):
-        for j in range(num_nodes):
-            if adj_matrix[i, j] > 0:  # Only consider existing edges
-                rest_lengths[(i, j)] = 1 / adj_matrix[i, j]
+            Parameters:
+                positions (cp.ndarray): Current positions of nodes in the embedding space.
 
-    # Gradient optimization loop
-    for _ in range(num_steps):
-        new_positions = {}
-        for node in range(num_nodes):
-            gradient = np.zeros(dim)
-            for neighbor in range(num_nodes):
-                if adj_matrix[node, neighbor] > 0:
-                    distance = np.linalg.norm(positions[node] - positions[neighbor]) + 1e-8  # Prevent zero division
-                    r_0 = rest_lengths[(node, neighbor)]
-                    diff = (distance - r_0) / distance  # Gradient of spring potential
-                    gradient += diff * (positions[node] - positions[neighbor])
+            Returns:
+                cp.ndarray: Forces acting on each node (shape: num_nodes x dim).
+            """
+            forces = cp.zeros_like(positions)
+            for i in range(len(positions)):
+                # Calculate displacement vectors from node i to all other nodes
+                delta = positions - positions[i]
+                # Compute distances between node i and others
+                distances = cp.linalg.norm(delta, axis=1)
+                # Mask to avoid self-interaction (distance = 0)
+                mask = distances != 0  
+                # Compute forces based on adjacency matrix and normalized displacements
+                forces[i] = cp.sum(
+                    adj_matrix[i, mask][:, None] * (delta[mask] / distances[mask, None]),
+                    axis=0
+                )
+            return forces
 
-            # Gradient descent update
-            new_positions[node] = positions[node] - learning_rate * gradient
+        # Iterative integration process
+        for _ in range(iterations):
+            # Calculate forces for the current positions
+            forces = calculate_forces(positions)
+            # Update velocities based on overdamped dynamics
+            velocities = -forces / gamma
+            # Update positions using the calculated velocities
+            new_positions = positions + velocities * dt
+            # Calculate total movement to check for convergence
+            total_movement = cp.sum(cp.linalg.norm(new_positions - positions, axis=1))
+            if total_movement < tol:  # Convergence condition
+                break
+            # Update positions for the next iteration
+            positions = new_positions
 
-        positions = new_positions  # Apply updates
+        # Calculate the pairwise distances in the final embedding
+        distances = cp.linalg.norm(positions[:, None] - positions[None, :], axis=2)
+        # Convert GPU results to CPU-friendly numpy arrays
+        return cp.asnumpy(positions), cp.asnumpy(distances)
 
-    return positions
-
-def compute_distance_matrix(positions):
+def HONE(G, dim=2, iterations=100, seed_ensemble=100, tol=1e-4, dt=0.01, gamma=1.0):
     """
-    Compute the Euclidean distance matrix for final node positions.
+    Perform Harmonic Oscillator Network Embedding (HONE) using GPU-based overdamped dynamics.
 
     Parameters:
-        positions (dict): Node positions from the embedding.
+        G (networkx.Graph): Input graph to be embedded.
+        dim (int): Number of dimensions for the embedding space.
+        iterations (int): Maximum number of iterations for the embedding process.
+        seed_ensemble (int): Number of random initializations (seeds) for ensemble calculation.
+        tol (float): Convergence tolerance for the total movement of positions.
+        dt (float): Time step for the integration process.
+        gamma (float): Damping coefficient for the overdamped dynamics.
 
     Returns:
-        np.ndarray: Pairwise distance matrix of shape (num_nodes, num_nodes).
+        tuple:
+            - ensemble_positions (list of np.ndarray): List of node positions for each ensemble (length: seed_ensemble).
+            - distance_matrices (np.ndarray): Array of pairwise distance matrices for each ensemble (shape: seed_ensemble x num_nodes x num_nodes).
     """
-    nodes = list(positions.keys())
-    num_nodes = len(nodes)
-    distance_matrix = np.zeros((num_nodes, num_nodes))
+    # Convert the graph to an adjacency matrix and move it to the GPU
+    adj_matrix = cp.asarray(nx.to_numpy_array(G, weight="weight"))
+    if not nx.is_weighted(G):
+        adj_matrix[adj_matrix > 0] = 1  # Convert to binary adjacency for unweighted graphs
 
-    for i in range(num_nodes):
-        for j in range(i + 1, num_nodes):
-            distance = np.linalg.norm(positions[nodes[i]] - positions[nodes[j]])
-            distance_matrix[i, j] = distance_matrix[j, i] = distance
+    # Create a list of CUDA streams for asynchronous execution
+    streams = [cp.cuda.Stream(non_blocking=True) for _ in range(seed_ensemble)]
+    results = [None] * seed_ensemble  # Preallocate results array
 
-    return distance_matrix
+    # Launch HONE_worker for each seed using separate CUDA streams
+    for seed, stream in zip(range(seed_ensemble), streams):
+        results[seed] = HONE_worker(adj_matrix, dim, iterations, tol, seed, dt, gamma, stream)
 
-def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
-    """
-    Perform multiple independent runs of HONE in parallel using multiprocessing.
+    # Wait for all CUDA streams to finish execution
+    cp.cuda.Stream.null.synchronize()
 
-    Parameters:
-        adj_matrix (np.ndarray): The adjacency matrix of the network.
-        dim (int): Number of dimensions for the embedding (default: 2).
-        num_steps (int): Number of iterations for optimization (default: 1000).
-        learning_rate (float): Learning rate for gradient descent (default: 0.01).
-        seed_ensemble (int): Number of random initializations for ensemble computation (default: 10).
-
-    Returns:
-        list: List of node position dictionaries for each ensemble run.
-        np.ndarray: 3D array of pairwise distance matrices (shape: (seed_ensemble, num_nodes, num_nodes)).
-    """
-    results = [None] * seed_ensemble
-
-    # Run HONE in parallel using multiple processes
-    with ProcessPoolExecutor() as executor:
-        futures = [
-            executor.submit(HONE, adj_matrix, dim, num_steps, learning_rate, seed)
-            for seed in range(seed_ensemble)
-        ]
-        for i, future in enumerate(futures):
-            results[i] = future.result()
-
-    # Extract node positions and compute distance matrices
-    ensemble_positions = results
-    distance_matrices = np.array([compute_distance_matrix(result) for result in results])
+    # Extract results from the GPU
+    ensemble_positions = [result[0] for result in results]
+    distance_matrices = np.array([result[1] for result in results])
 
     return ensemble_positions, distance_matrices
 
