@@ -97,14 +97,14 @@ def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_en
     Perform multiple independent runs of HONE in parallel using GPU-accelerated CuPy.
     """
     results = [None] * seed_ensemble
-
+    
     with ProcessPoolExecutor() as executor:
         futures = [
             executor.submit(HONE, adj_matrix, dim, num_steps, learning_rate, seed)
             for seed in range(seed_ensemble)
         ]
         for i, future in enumerate(futures):
-            results[i] = future.result()
+            results[i] = cp.asnumpy(future.result())  # CuPy → NumPy 변환
 
     # Compute distance matrices for each embedding
     distance_matrices = cp.array([compute_distance_matrix(result) for result in results])
