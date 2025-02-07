@@ -1,132 +1,152 @@
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 
-def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None, 
-         energy_window=10, tolerance=1e-4, max_increase_steps=5):
-    """
-    Harmonic Oscillator Network Embedding (HONE) with energy monitoring.
-    If the energy increases consistently, the optimization stops early.
 
-    Parameters:
-    - adj_matrix: Adjacency matrix of the network.
-    - dim: Embedding space dimension.
-    - num_steps: Maximum optimization steps.
-    - learning_rate: Step size for gradient descent.
-    - seed: Random seed for reproducibility.
-    - energy_window: Number of past energy values to check for increase.
-    - tolerance: Minimum energy increase threshold to trigger stopping condition.
-    - max_increase_steps: Allowed number of consecutive increases before stopping.
+def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
+    """
+    Perform Harmonic Optimization using Molecular Dynamics (HONE).
     """
     if seed is not None:
         np.random.seed(seed)
 
     num_nodes = adj_matrix.shape[0]
 
-    # Initialize random positions
-    positions = {node: np.random.rand(dim) for node in range(num_nodes)}
+    # Initialize masses and positions
+    masses = np.sum(adj_matrix, axis=1)
+    masses[masses == 0] = 1.0  # Handle isolated nodes
 
-    # Compute rest lengths (equilibrium distances) for edges
+    positions = np.random.rand(num_nodes, dim)
+    velocities = np.zeros((num_nodes, dim))
+
+    # Define equilibrium lengths for edges
     rest_lengths = {
-        (i, j): 1 / adj_matrix[i, j]
-        for i in range(num_nodes) for j in range(num_nodes)
-        if adj_matrix[i, j] > 0 and i != j  # 자기 자신 제외
+        (i, j): 1 / adj_matrix[i, j] if adj_matrix[i, j] > 0 else 0
+        for i in range(num_nodes) for j in range(i + 1, num_nodes)
+        if adj_matrix[i, j] > 0
     }
 
-    # Energy tracking variables
+    positions_history = []
     energy_history = []
-    consecutive_increase = 0
 
     def compute_energy():
-        """Compute the total system energy based on node positions."""
-        energy = 0
-        for (i, j), r_0 in rest_lengths.items():
-            distance = np.linalg.norm(positions[i] - positions[j])
-            energy += 0.5 * ((distance - r_0) ** 2)  # Hookean potential
-        return energy
+        """Compute the total system energy (kinetic + potential)."""
+        kinetic_energy = 0.5 * np.sum(masses[:, np.newaxis] * velocities**2)
+        potential_energy = sum(
+            0.5 * adj_matrix[i, j] * (np.linalg.norm(positions[i] - positions[j]) - rest_lengths[(i, j)])**2
+            for (i, j) in rest_lengths.keys()
+        )
+        return kinetic_energy + potential_energy
 
-    # Gradient optimization loop
     for step in range(num_steps):
-        new_positions = {}
-        for node in range(num_nodes):
-            gradient = np.zeros(dim)
-            for neighbor in range(num_nodes):
-                if node != neighbor and adj_matrix[node, neighbor] > 0:  # 자기 자신 제외
-                    distance = np.linalg.norm(positions[node] - positions[neighbor])
-                    r_0 = rest_lengths[(node, neighbor)]
-                    diff = (distance - r_0) / distance if distance > 0 else 0  # Zero division 방지
-                    gradient += diff * (positions[node] - positions[neighbor])
+        forces = np.zeros((num_nodes, dim))
 
-            # Gradient descent update
-            new_positions[node] = positions[node] - learning_rate * gradient
+        # Compute forces based on Hooke's Law
+        for (i, j) in rest_lengths.keys():
+            r_vec = positions[i] - positions[j]
+            distance = np.linalg.norm(r_vec)
+            r_0 = rest_lengths[(i, j)]
 
-        positions = new_positions  # Apply updates
+            if distance > 1e-8:  # Prevent division by zero
+                k_ij = adj_matrix[i, j]
+                force_magnitude = -k_ij * (distance - r_0)
+                force_vec = force_magnitude * (r_vec / distance)
 
-        # Compute energy after update
-        current_energy = compute_energy()
-        energy_history.append(current_energy)
+                forces[i] += force_vec
+                forces[j] -= force_vec
 
-        # Check for consistent increase in energy
-        if len(energy_history) > energy_window:
-            recent_energies = energy_history[-energy_window:]
-            if all(recent_energies[i] < recent_energies[i + 1] - tolerance for i in range(len(recent_energies) - 1)):
-                consecutive_increase += 1
-            else:
-                consecutive_increase = 0  # Reset if decrease or fluctuation occurs
+        # Apply friction
+        forces -= gamma * velocities
 
-            # Stop if energy keeps increasing consistently
-            if consecutive_increase >= max_increase_steps:
-                print(f"⚠️ Optimization stopped early at step {step} due to continuous energy increase.")
-                break
+        # Verlet Integration
+        velocities += (forces / masses[:, np.newaxis]) * (0.5 * dt)
+        positions += velocities * dt
 
-    return positions
+        # Recalculate forces after position update
+        new_forces = np.zeros((num_nodes, dim))
+
+        for (i, j) in rest_lengths.keys():
+            r_vec = positions[i] - positions[j]
+            distance = np.linalg.norm(r_vec)
+            r_0 = rest_lengths[(i, j)]
+
+            if distance > 1e-8:
+                k_ij = adj_matrix[i, j]
+                force_magnitude = -k_ij * (distance - r_0)
+                force_vec = force_magnitude * (r_vec / distance)
+
+                new_forces[i] += force_vec
+                new_forces[j] -= force_vec
+
+        # Apply friction to new forces
+        new_forces -= gamma * velocities
+        velocities += (new_forces / masses[:, np.newaxis]) * (0.5 * dt)
+
+        # Save energy and positions
+        energy_history.append(compute_energy())
+        positions_history.append(positions.copy())
+
+    return positions_history, energy_history
+
 
 def compute_distance_matrix(positions):
     """
     Compute the Euclidean distance matrix for final node positions.
     """
-    nodes = list(positions.keys())
-    num_nodes = len(nodes)
+    num_nodes = positions.shape[0]
     distance_matrix = np.zeros((num_nodes, num_nodes))
 
     for i in range(num_nodes):
         for j in range(i + 1, num_nodes):
-            distance = np.linalg.norm(positions[nodes[i]] - positions[nodes[j]])
+            distance = np.linalg.norm(positions[i] - positions[j])
             distance_matrix[i, j] = distance_matrix[j, i] = distance
 
     return distance_matrix
 
-def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
-    """
-    Perform multiple independent runs of HONE in parallel using multiprocessing.
-    """
-    results = [None] * seed_ensemble
 
-    # Run HONE in parallel using multiple processes
-    with ProcessPoolExecutor() as executor:
+def single_process_run(seed, adj_matrix, dim, num_steps, dt):
+    """
+    Wrapper function to run HONE for a single seed.
+    """
+    positions_history, _ = HONE(adj_matrix, dim, num_steps, dt, seed=seed)
+    return positions_history[-1]  # Return final positions
+
+
+def parallel_HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, seed_ensemble=10, max_workers=None):
+    """
+    Perform multiple independent runs of HONE using parallel processing.
+    
+    Parameters:
+        adj_matrix (ndarray): Adjacency matrix of the graph.
+        dim (int): Dimensionality of the embedding space.
+        num_steps (int): Number of simulation steps.
+        dt (float): Time step for integration.
+        seed_ensemble (int): Number of independent runs.
+        max_workers (int, optional): Maximum number of worker processes.
+
+    Returns:
+        results (list): List of final node positions from each run.
+        distance_matrices (ndarray): Distance matrices for each embedding.
+    """
+    with ProcessPoolExecutor(max_workers=max_workers) as executor:
+        # Submit HONE runs to the executor
         futures = [
-            executor.submit(HONE, adj_matrix, dim, num_steps, learning_rate, seed)
+            executor.submit(single_process_run, seed, adj_matrix, dim, num_steps, dt)
             for seed in range(seed_ensemble)
         ]
-        for i, future in enumerate(futures):
-            results[i] = future.result()
+        results = [future.result() for future in futures]
 
-    # Extract node positions and compute distance matrices
-    ensemble_positions = results
+    # Compute distance matrices for each embedding
     distance_matrices = np.array([compute_distance_matrix(result) for result in results])
+    return results, distance_matrices
 
-    return ensemble_positions, distance_matrices
 
 def HNI(distance_matrices):
     """
     Compute the Harmonic Network Inconsistency (HNI) value.
     """
-    # Compute variance for each pair of nodes across different embeddings
     pairwise_variances = np.var(distance_matrices, axis=0)
-
-    # Extract upper triangular part (excluding diagonal) to avoid redundancy
     upper_tri_indices = np.triu_indices_from(pairwise_variances, k=1)
     upper_tri_variances = pairwise_variances[upper_tri_indices]
 
-    # Compute mean variance (HNI), handling NaN cases
     hni_value = np.nanmean(upper_tri_variances) if not np.isnan(upper_tri_variances).all() else 0
     return hni_value
