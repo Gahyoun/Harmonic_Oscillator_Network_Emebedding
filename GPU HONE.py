@@ -1,86 +1,118 @@
-import cupy as cp
-from concurrent.futures import ProcessPoolExecutor
+import cupy as cp  # CuPy 사용
+import numpy as np
 
-def HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed=None, 
-             energy_window=10, tolerance=1e-4, max_increase_steps=5):
+
+def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
     """
-    Harmonic Oscillator Network Embedding (HONE) - GPU Version with Energy Tracking.
-
+    Perform Harmonic Optimization using Molecular Dynamics (HONE) on GPU.
+    - Utilizes CuPy for GPU acceleration.
+    
     Parameters:
-    - adj_matrix: Adjacency matrix (CuPy tensor)
-    - dim: Embedding dimension
-    - num_steps: Optimization steps
-    - learning_rate: Step size
-    - seed: Random seed
-    - energy_window: Energy increase monitoring window
-    - tolerance: Minimum energy increase to trigger stopping
-    - max_increase_steps: Allowed consecutive increases before stopping
+        adj_matrix (ndarray or cupy.ndarray): Adjacency matrix of the graph.
+        dim (int): Dimensionality of the embedding space.
+        num_steps (int): Number of simulation steps.
+        dt (float): Time step for integration.
+        gamma (float): Friction coefficient.
+        seed (int, optional): Random seed for reproducibility.
+
+    Returns:
+        positions_history (list of cupy.ndarray): History of node positions during optimization.
+        energy_history (list of float): History of total system energy.
     """
+    # Convert adjacency matrix to CuPy array if it's a NumPy array
+    adj_matrix = cp.asarray(adj_matrix)
+
     if seed is not None:
         cp.random.seed(seed)
 
     num_nodes = adj_matrix.shape[0]
 
-    # Initialize random positions (GPU array)
+    # Initialize masses and positions
+    masses = cp.sum(adj_matrix, axis=1)
+    masses[masses == 0] = 1.0  # Handle isolated nodes
+
     positions = cp.random.rand(num_nodes, dim)
+    velocities = cp.zeros((num_nodes, dim))
 
-    # Compute rest lengths (inverse of weights) for edges (ignoring self-loops)
-    rest_lengths = cp.zeros((num_nodes, num_nodes))
-    mask = (adj_matrix > 0) & (cp.arange(num_nodes)[:, None] != cp.arange(num_nodes))  # Ignore self-loops
-    rest_lengths[mask] = 1 / adj_matrix[mask]
+    # Define equilibrium lengths for edges
+    rest_lengths = {
+        (i, j): 1 / adj_matrix[i, j] if adj_matrix[i, j] > 0 else 0
+        for i in range(num_nodes) for j in range(i + 1, num_nodes)
+        if adj_matrix[i, j] > 0
+    }
 
-    # Energy tracking
+    positions_history = []
     energy_history = []
-    consecutive_increase = 0
 
     def compute_energy():
-        """Compute total system energy based on node positions."""
-        i, j = cp.where(adj_matrix > 0)
-        distances = cp.linalg.norm(positions[i] - positions[j], axis=1)
-        r_0 = rest_lengths[i, j]
-        energy = 0.5 * cp.sum((distances - r_0) ** 2)
-        return energy.item()
+        """Compute the total system energy (kinetic + potential)."""
+        kinetic_energy = 0.5 * cp.sum(masses[:, cp.newaxis] * velocities**2)
+        potential_energy = cp.sum([
+            0.5 * adj_matrix[i, j] * (cp.linalg.norm(positions[i] - positions[j]) - rest_lengths[(i, j)])**2
+            for (i, j) in rest_lengths.keys()
+        ])
+        return float(kinetic_energy + potential_energy)
 
-    # Gradient optimization loop
     for step in range(num_steps):
-        gradients = cp.zeros((num_nodes, dim))
+        forces = cp.zeros((num_nodes, dim))
 
-        for node in range(num_nodes):
-            neighbors = cp.where(adj_matrix[node] > 0)[0]
-            if neighbors.size > 0:
-                distances = cp.linalg.norm(positions[node] - positions[neighbors], axis=1)
-                r_0 = rest_lengths[node, neighbors]
+        # Compute forces based on Hooke's Law
+        for (i, j) in rest_lengths.keys():
+            r_vec = positions[i] - positions[j]
+            distance = cp.linalg.norm(r_vec)
+            r_0 = rest_lengths[(i, j)]
 
-                # Avoid zero division
-                diff = cp.where(distances > 0, (distances - r_0) / distances, 0).reshape(-1, 1)
+            if distance > 1e-8:  # Prevent division by zero
+                k_ij = adj_matrix[i, j]
+                force_magnitude = -k_ij * (distance - r_0)
+                force_vec = force_magnitude * (r_vec / distance)
 
-                gradients[node] = cp.sum(diff * (positions[node] - positions[neighbors]), axis=0)
+                forces[i] += force_vec
+                forces[j] -= force_vec
 
-        # Update positions using gradient descent
-        positions -= learning_rate * gradients
+        # Apply friction
+        forces -= gamma * velocities
 
-        # Compute energy after update
-        current_energy = compute_energy()
-        energy_history.append(current_energy)
+        # Verlet Integration
+        velocities += (forces / masses[:, cp.newaxis]) * (0.5 * dt)
+        positions += velocities * dt
 
-        # Check for consistent energy increase
-        if len(energy_history) > energy_window:
-            recent_energies = energy_history[-energy_window:]
-            if all(recent_energies[i] < recent_energies[i + 1] - tolerance for i in range(len(recent_energies) - 1)):
-                consecutive_increase += 1
-            else:
-                consecutive_increase = 0  # Reset if decrease or fluctuation occurs
+        # Recalculate forces after position update
+        new_forces = cp.zeros((num_nodes, dim))
 
-            # Stop if energy keeps increasing consistently
-            if consecutive_increase >= max_increase_steps:
-                print(f"⚠️ Optimization stopped early at step {step} due to continuous energy increase.")
-                break
+        for (i, j) in rest_lengths.keys():
+            r_vec = positions[i] - positions[j]
+            distance = cp.linalg.norm(r_vec)
+            r_0 = rest_lengths[(i, j)]
 
-    return positions
+            if distance > 1e-8:
+                k_ij = adj_matrix[i, j]
+                force_magnitude = -k_ij * (distance - r_0)
+                force_vec = force_magnitude * (r_vec / distance)
+
+                new_forces[i] += force_vec
+                new_forces[j] -= force_vec
+
+        # Apply friction to new forces
+        new_forces -= gamma * velocities
+        velocities += (new_forces / masses[:, cp.newaxis]) * (0.5 * dt)
+
+        # Save energy and positions
+        energy_history.append(compute_energy())
+        positions_history.append(cp.asarray(positions.copy()))
+
+    return positions_history, energy_history
+
 
 def compute_distance_matrix(positions):
     """
-    Compute the Euclidean distance matrix using CuPy.
+    Compute the Euclidean distance matrix for final node positions on GPU.
+    
+    Parameters:
+        positions (cupy.ndarray): Node positions.
+
+    Returns:
+        distance_matrix (cupy.ndarray): Euclidean distance matrix.
     """
     num_nodes = positions.shape[0]
     distance_matrix = cp.zeros((num_nodes, num_nodes))
@@ -91,38 +123,3 @@ def compute_distance_matrix(positions):
             distance_matrix[i, j] = distance_matrix[j, i] = distance
 
     return distance_matrix
-
-def parallel_HONE(adj_matrix, dim=2, num_steps=1000, learning_rate=0.01, seed_ensemble=10):
-    """
-    Perform multiple independent runs of HONE in parallel using GPU-accelerated CuPy.
-    """
-    results = [None] * seed_ensemble
-
-    # ThreadPoolExecutor로 각 HONE 실행을 병렬로 처리
-    with ThreadPoolExecutor() as executor:
-        futures = [
-            executor.submit(HONE, adj_matrix, dim, num_steps, learning_rate, seed)
-            for seed in range(seed_ensemble)
-        ]
-        for i, future in enumerate(futures):
-            results[i] = cp.asnumpy(future.result())  # CuPy → NumPy 변환
-
-    # 각 임베딩에 대한 거리 행렬 계산
-    distance_matrices = cp.array([compute_distance_matrix(result) for result in results])
-
-    return results, distance_matrices
-
-def HNI(distance_matrices):
-    """
-    Compute the Harmonic Network Inconsistency (HNI) value using GPU.
-    """
-    # Compute variance for each pair of nodes across different embeddings
-    pairwise_variances = cp.var(distance_matrices, axis=0)
-
-    # Extract upper triangular part (excluding diagonal)
-    upper_tri_indices = cp.triu_indices_from(pairwise_variances, k=1)
-    upper_tri_variances = pairwise_variances[upper_tri_indices]
-
-    # Compute mean variance (HNI), handling NaN cases
-    hni_value = cp.nanmean(upper_tri_variances) if not cp.isnan(upper_tri_variances).all() else 0
-    return hni_value
