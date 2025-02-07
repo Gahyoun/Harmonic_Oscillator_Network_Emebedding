@@ -1,12 +1,13 @@
 import numpy as np
 
 
+
 def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
     """
     Perform Harmonic Optimization using Molecular Dynamics (HONE).
     - Verlet Integration applied for numerical stability.
     - Langevin Dynamics included for friction.
-    
+
     Parameters:
         adj_matrix (ndarray): Adjacency matrix of the graph.
         dim (int): Dimensionality of the embedding space.
@@ -16,8 +17,7 @@ def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
         seed (int, optional): Random seed for reproducibility.
 
     Returns:
-        positions_history (list): History of node positions during optimization.
-        energy_history (list): History of total system energy.
+        positions (ndarray): Final node positions after optimization.
     """
     if seed is not None:
         np.random.seed(seed)
@@ -37,18 +37,6 @@ def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
         for i in range(num_nodes) for j in range(i + 1, num_nodes)
         if adj_matrix[i, j] > 0
     }
-
-    positions_history = []
-    energy_history = []
-
-    def compute_energy():
-        """Compute the total system energy (kinetic + potential)."""
-        kinetic_energy = 0.5 * np.sum(masses[:, np.newaxis] * velocities**2)
-        potential_energy = sum(
-            0.5 * adj_matrix[i, j] * (np.linalg.norm(positions[i] - positions[j]) - rest_lengths[(i, j)])**2
-            for (i, j) in rest_lengths.keys()
-        )
-        return kinetic_energy + potential_energy
 
     for step in range(num_steps):
         forces = np.zeros((num_nodes, dim))
@@ -94,11 +82,7 @@ def HONE(adj_matrix, dim=2, num_steps=1000, dt=0.01, gamma=0.1, seed=None):
         new_forces -= gamma * velocities
         velocities += (new_forces / masses[:, np.newaxis]) * (0.5 * dt)
 
-        # Save energy and positions
-        energy_history.append(compute_energy())
-        positions_history.append(positions.copy())
-
-    return positions_history, energy_history
+    return positions 
 
 
 def compute_distance_matrix(positions):
